@@ -3,17 +3,54 @@
 
 rgb_lcd lcd;
 
-void setup() {
+// déclaration des ports des boutons
+int BP0 = 0;
+int BP1 = 2;
+int BP2 = 12;
+
+// declaration du potentiometre
+int pot = 33;
+
+int Val_BP0;
+int Val_BP1;
+int Val_BP2;
+int Val_pot;
+
+// Paramétrage du rétroéclairage
+const int colorR = 255;
+const int colorG = 0;
+const int colorB = 0;
+
+void setup()
+{
   // Initialise la liaison avec le terminal
   Serial.begin(115200);
+
+  // Configuration des ports pour les boutons
+  pinMode(BP0, INPUT_PULLUP);
+  pinMode(BP1, INPUT_PULLUP);
+  pinMode(BP2, INPUT_PULLUP);
 
   // Initialise l'écran LCD
   Wire1.setPins(15, 5);
   lcd.begin(16, 2, LCD_5x8DOTS, Wire1);
-  lcd.printf("Trieur de balles");
-
+  lcd.setRGB(colorR, colorG, colorB);
 }
 
-void loop() {
+void loop()
+{
+  // Lecture de la valeur des boutons
+  Val_BP0 = digitalRead(BP0);
+  Val_BP1 = digitalRead(BP1);
+  Val_BP2 = digitalRead(BP2);
 
+  Val_pot = analogRead(pot);
+
+  // Message dans le terminal
+  Serial.printf("bp0=%d  bp1=%d\n bp2=%d", Val_BP0, Val_BP1, Val_BP2);
+
+  // Affichage sur l'écran LCD
+  lcd.setCursor(0, 0);
+  lcd.printf("potar = %d", Val_pot);
+  delay(300);
 }
