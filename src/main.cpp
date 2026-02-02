@@ -49,7 +49,9 @@ int colorR = 255;
 int colorG = 0;
 int colorB = 0;
 
+//asservissement 
 int csg_vitesse;
+float integ=0;
 
 void setup()
 {
@@ -111,13 +113,13 @@ void loop()
   lcd.setCursor(0, 1);
   lcd.printf("enc=%ld  etat=%d", encoder_count, etat);
 
-
   switch (etat)
   {
   case 1:
-    digitalWrite(phase, 0);
     digitalWrite(ON_PWM, 1);
-    ledcWrite(canal0, 600);
+    /*digitalWrite(phase, 0);
+    ledcWrite(canal0, 600);*/
+    csg_vitesse = 3;
     if (Val_IR0 > IR_Seuil)
     {
       etat = 2;
@@ -130,6 +132,8 @@ void loop()
     step_count = 0;
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
+    csg_vitesse = 0;
+    integ = 0;
     if (Val_BP0 == 0)
     {
       step_count = 100;
@@ -143,10 +147,10 @@ void loop()
     break;
 
   case 3:
-    digitalWrite(phase, 0);
     digitalWrite(ON_PWM, 1);
-    ledcWrite(canal0, 600);
-
+    /*digitalWrite(phase, 0);
+    ledcWrite(canal0, 600);*/
+    csg_vitesse = 3;
     if (encoder.getCount() > step_count)
     {
       etat = 4;
@@ -157,6 +161,8 @@ void loop()
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     step_count += 100;
+    csg_vitesse = 0;
+    integ = 0;
     delay(1000);
     etat = 3;
 
@@ -167,9 +173,10 @@ void loop()
     break;
 
   case 5:
-    digitalWrite(phase, 1);
     digitalWrite(ON_PWM, 1);
-    ledcWrite(canal0, 600);
+    /*digitalWrite(phase, 1);
+    ledcWrite(canal0, 600);*/
+    csg_vitesse = -3;
     if (encoder.getCount() < step_count)
     {
       etat = 6;
@@ -179,6 +186,8 @@ void loop()
   case 6:
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
+    csg_vitesse = 0;
+    integ = 0;
 
     delay(1000);
     step_count -= 100;
@@ -194,31 +203,50 @@ void loop()
 
 void vTaskPeriodic(void *pvParameters)
 {
-  int encoder_memo=0;
+  const float Kp = 30.0f;         // gain proportionnel (ajuster)
+  const float Ki = 8.0f;         // gain integral (ajuster)
+
+  int encoder_memo = 0;
   int image_vitesse;
   long encoder_count;
-  int erreur;
-  int commande;
+  float erreur;
+  float commande;
+  float prev_erreur = 0.0f;
+  
+
   TickType_t xLastWakeTime;
   // Lecture du nombre de ticks quand la tâche commence
   xLastWakeTime = xTaskGetTickCount();
   while (1)
   {
-    Serial.printf("A répéter\n");
-    encoder_count = encoder.getCount(); 
+    encoder_count = encoder.getCount();
     image_vitesse = encoder_count - encoder_memo;
     encoder_memo = encoder_count;
 
-    erreur = csg_vitesse - image_vitesse;
+    erreur = (float)csg_vitesse - (float)image_vitesse;
 
-    // Asservissement proportionnel
-    commande = 550 + (erreur * 5);   // 5 est le gain proportionnel à ajuster
-    commande = constrain(commande, 0, 2047);  // Limite entre 0 et 2047 (résolution 11 bits)
-    ledcWrite(canal0, commande);
+   
+    integ = (integ + erreur);
 
-    Serial.printf("image_vitesse=%d  erreur=%d  commande=%d\n", image_vitesse, erreur, commande);
+    // Correcteur
+    float commande_f = Kp * erreur + Ki * integ;
 
-    // Endort la tâche pendant le temps restant par rapport au réveil,      
+    int commande = (int)roundf(commande_f);
+    commande = constrain(commande, -2047, 2047); // résolution 11 bits
+
+    if (commande > 0)
+    {
+      digitalWrite(phase, 0);
+      ledcWrite(canal0, commande);
+    }
+    else
+    {
+      digitalWrite(phase, 1);
+      ledcWrite(canal0, -commande);
+    }
+
+    Serial.printf("%d  %d  %d \n", commande, image_vitesse, csg_vitesse);
+    // Endort la tâche pendant le temps restant par rapport au réveil,
     // ici 100ms, donc la tâche s'effectue ici toutes les 100ms.
     // xLastWakeTime sera mis à jour avec le nombre de ticks au prochain
     // réveil de la tâche.
