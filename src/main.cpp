@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "rgb_lcd.h"
 #include <ESP32Encoder.h>
+#include <Wire.h>
+#include <Adafruit_TCS34725.h>
 
 void vTaskPeriodic(void *pvParameters);
 
@@ -41,6 +43,10 @@ int Val_BP1;
 int Val_BP2;
 int Val_pot;
 
+// capteur de couleur
+int SDA = 21;
+int SCL = 22;
+
 // Seuil de détection du capteur IR (à ajuster selon votre capteur)
 int IR_Seuil = 2000;
 
@@ -79,11 +85,23 @@ void setup()
   // config PWM
   ledcSetup(canal0, freq, resolution);
 
+  //Config Capteur couleur
+  Wire1.setPins(SDA, SCL);
+
   // liaison du canal du PWM avec les broches de l'ESP32
   ledcAttachPin(PWM, canal0);
 
   Serial.begin(115200);
   Serial.printf("Initialisations\n");
+
+  Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_614MS, TCS34725_GAIN_1X);
+
+  // Initialisation du capteur de couleur TCS34725
+  if (tcs.begin()) {
+    Serial.println("TCS34725 trouvé");
+  } else {
+    Serial.println("TCS34725 non trouvé - vérifier les connexions");
+  }
 
   // Création de la tâche périodique
   xTaskCreate(vTaskPeriodic, "vTaskPeriodic", 10000, NULL, 2, NULL);
@@ -198,6 +216,8 @@ void loop()
       etat = 2;
     }
     break;
+
+  
   }
 }
 
