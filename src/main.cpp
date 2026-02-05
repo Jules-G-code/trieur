@@ -3,6 +3,9 @@
 #include <ESP32Encoder.h>
 #include <Wire.h>
 #include <Adafruit_TCS34725.h>
+#include <ESP32Servo.h>
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
 
 void vTaskPeriodic(void *pvParameters);
 
@@ -53,6 +56,13 @@ int colorR = 255;
 int colorG = 0;
 int colorB = 0;
 
+//servomoteur
+int val_servo;
+Servo myservo;
+
+//accelerometre
+Adafruit_MPU6050 mpu;
+
 // asservissement
 int csg_vitesse;
 float integ = 0;
@@ -102,6 +112,23 @@ void setup()
     Serial.println("TCS34725 non trouvé - vérifier les connexions");
   }
 
+  //initialisation servomoteur
+  ESP32PWM::allocateTimer(2);
+	myservo.setPeriodHertz(50);
+  myservo.attach(13);
+
+  //initialisation accélérometre
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) {
+      delay(10);
+    }
+  }
+
+  Serial.println("MPU6050 Found!"); 
+  mpu.setHighPassFilter(MPU6050_HIGHPASS_0_63_HZ);
+  mpu.setAccelerometerRange(MPU6050_RANGE_2_G);
+
   // Création de la tâche périodique
   xTaskCreate(vTaskPeriodic, "vTaskPeriodic", 10000, NULL, 2, NULL);
 }
@@ -137,40 +164,49 @@ void loop()
 
   // colorTemp = tcs.calculateColorTemperature(r, g, b);
   colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
-  Serial.printf("%d, %d, %d, %d\n", IR_Seuil, Val_IR0, etat, step_count);
+  //Serial.printf("%d, %d, %d, %d\n", IR_Seuil, Val_IR0, etat, Val_pot);
+
+  // accelerometre 
+    sensors_event_t a, gyro, temp;
+    mpu.getEvent( &a, &gyro, &temp);
+    float angle = atan2(a.acceleration.y, -a.acceleration.x)*180/M_PI;
+
+    Serial.println(angle);                                        
 
   switch (etat)
   {
-  case 1:
-    digitalWrite(ON_PWM, 1);
+  case 1: // initialisation 
+    digitalWrite(ON_PWM, 1); 
+
+    myservo.write(1456); // servomoteur 90°
     csg_vitesse = 2;
-    if (Val_IR0 > IR_Seuil)
+    if (Val_IR0 > IR_Seuil) // bras position initial
     {
       etat = 2;
     }
     break;
 
   case 2:
-    encoder.setCount(0);
+    encoder.setCount(0); // arret du bras 
     encoder_count = 0;
     step_count = 0;
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     csg_vitesse = 0;
     integ = 0;
-    if (Val_BP0 == 0)
+    if (Val_BP0 == 0) // appui BP bleu
     {
       step_count = 100;
       etat = 3;
     }
-    else if (Val_BP1 == 0)
+    else if (Val_BP1 == 0) // appui BP jaune
     {
       step_count = -100;
       etat = 5;
     }
     break;
 
-  case 3:
+  case 3: // avance le bras d'un cran (sens des aiguilles d'une montre) jusque ce que le encoder soit superieur au step_count
     digitalWrite(ON_PWM, 1);
     csg_vitesse = 2;
     if (encoder.getCount() > step_count)
@@ -179,7 +215,7 @@ void loop()
     }
     break;
 
-  case 4:
+  case 4: // arrete le bras pendant 1s puis incremente step_count
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     step_count += 100;
@@ -194,7 +230,7 @@ void loop()
     }
     break;
 
-  case 5:
+  case 5: //avance le bras d'un cran (sens inverse des aiguilles d'une montre) jusque ce que le encoder soit inferieur au step_count
     digitalWrite(ON_PWM, 1);
     csg_vitesse = -2;
     if (encoder.getCount() < step_count)
@@ -203,7 +239,7 @@ void loop()
     }
     break;
 
-  case 6:
+  case 6: // arrete le bras pendant 1s puis incremente step_count
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     csg_vitesse = 0;
@@ -219,7 +255,7 @@ void loop()
     }
     break;
 
-  case 7:
+  case 7: // detection de la couleur de la balle  
     if (g==1 & b==1) // balle jaune
     {
       etat = 8;
@@ -230,7 +266,7 @@ void loop()
     }
     break;
 
-  case 8:
+  case 8: // positionne la balle jaune sur le servomoteur 
     digitalWrite(ON_PWM, 1);
     csg_vitesse = 2;
     if (encoder.getCount() > 640)
@@ -239,21 +275,20 @@ void loop()
     }
     break;
 
-  case 9:
+  case 9: // arret du bras + ejection de la balle par le servomoteur 
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     csg_vitesse = 0;
     integ = 0;
-    delay(1000);
 
-    if (step_count > 520)
-    {
-      delay(5000);
-      etat = 1;
-    }
+    delay(3000);
+    myservo.write(1140);
+    delay(3000);
+    etat = 1;
+    
     break;
 
-  case 10:
+  case 10: // positionne la balle blanche sur la detection de balle 
     digitalWrite(ON_PWM, 1);
     csg_vitesse = 1;
     if (encoder.getCount() > 730)
@@ -262,7 +297,7 @@ void loop()
     }
     break;
 
-  case 11:
+  case 11: // arret du bras 
     digitalWrite(ON_PWM, 0);
     ledcWrite(canal0, 0);
     step_count += 100;
@@ -271,13 +306,13 @@ void loop()
     delay(1000);
     etat = 10;
 
-    if (step_count > 730)
+    if (step_count > 730) 
     {
       etat = 12;
     }
     break;
 
-  case 12:
+  case 12: // vérification de la présence de la balle (au cas où ou on la retire manuellement) 
     if (Val_IR0 < 100)
     {
       etat = 1;
