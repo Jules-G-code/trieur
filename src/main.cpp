@@ -6,6 +6,8 @@
 
 void vTaskPeriodic(void *pvParameters);
 
+Adafruit_TCS34725 tcs;
+
 rgb_lcd lcd;
 
 // déclaration des ports des boutons
@@ -43,10 +45,6 @@ int Val_BP1;
 int Val_BP2;
 int Val_pot;
 
-// capteur de couleur
-int SDA = 21;
-int SCL = 22;
-
 // Seuil de détection du capteur IR (à ajuster selon votre capteur)
 int IR_Seuil = 2000;
 
@@ -55,9 +53,9 @@ int colorR = 255;
 int colorG = 0;
 int colorB = 0;
 
-//asservissement 
+// asservissement
 int csg_vitesse;
-float integ=0;
+float integ = 0;
 
 void setup()
 {
@@ -85,8 +83,8 @@ void setup()
   // config PWM
   ledcSetup(canal0, freq, resolution);
 
-  //Config Capteur couleur
-  Wire1.setPins(SDA, SCL);
+  // Config Capteur couleur
+  Wire.begin();
 
   // liaison du canal du PWM avec les broches de l'ESP32
   ledcAttachPin(PWM, canal0);
@@ -94,12 +92,13 @@ void setup()
   Serial.begin(115200);
   Serial.printf("Initialisations\n");
 
-  Adafruit_TCS34725 tcs = Adafruit_TCS34725(TCS34725_INTEGRATIONTIME_614MS, TCS34725_GAIN_1X);
-
   // Initialisation du capteur de couleur TCS34725
-  if (tcs.begin()) {
+  if (tcs.begin())
+  {
     Serial.println("TCS34725 trouvé");
-  } else {
+  }
+  else
+  {
     Serial.println("TCS34725 non trouvé - vérifier les connexions");
   }
 
@@ -131,13 +130,20 @@ void loop()
   lcd.setCursor(0, 1);
   lcd.printf("enc=%ld  etat=%d", encoder_count, etat);
 
+  // capteur de couleur
+  uint16_t r, g, b, c, colorTemp;
+
+  tcs.getRawData(&r, &g, &b, &c);
+
+  // colorTemp = tcs.calculateColorTemperature(r, g, b);
+  colorTemp = tcs.calculateColorTemperature_dn40(r, g, b, c);
+  Serial.printf("%d, %d, %d, %d\n", IR_Seuil, Val_IR0, etat, step_count);
+
   switch (etat)
   {
   case 1:
     digitalWrite(ON_PWM, 1);
-    /*digitalWrite(phase, 0);
-    ledcWrite(canal0, 600);*/
-    csg_vitesse = 3;
+    csg_vitesse = 2;
     if (Val_IR0 > IR_Seuil)
     {
       etat = 2;
@@ -166,9 +172,7 @@ void loop()
 
   case 3:
     digitalWrite(ON_PWM, 1);
-    /*digitalWrite(phase, 0);
-    ledcWrite(canal0, 600);*/
-    csg_vitesse = 3;
+    csg_vitesse = 2;
     if (encoder.getCount() > step_count)
     {
       etat = 4;
@@ -184,17 +188,15 @@ void loop()
     delay(1000);
     etat = 3;
 
-    if (step_count > 840)
+    if (step_count > 540)
     {
-      etat = 2;
+      etat = 7;
     }
     break;
 
   case 5:
     digitalWrite(ON_PWM, 1);
-    /*digitalWrite(phase, 1);
-    ledcWrite(canal0, 600);*/
-    csg_vitesse = -3;
+    csg_vitesse = -2;
     if (encoder.getCount() < step_count)
     {
       etat = 6;
@@ -217,14 +219,81 @@ void loop()
     }
     break;
 
-  
+  case 7:
+    if (g==1 & b==1) // balle jaune
+    {
+      etat = 8;
+    }
+    else if (r==1 & b==2) //balle blanche
+    {
+      etat = 10;
+    }
+    break;
+
+  case 8:
+    digitalWrite(ON_PWM, 1);
+    csg_vitesse = 2;
+    if (encoder.getCount() > 640)
+    {
+      etat = 9;
+    }
+    break;
+
+  case 9:
+    digitalWrite(ON_PWM, 0);
+    ledcWrite(canal0, 0);
+    csg_vitesse = 0;
+    integ = 0;
+    delay(1000);
+
+    if (step_count > 520)
+    {
+      delay(5000);
+      etat = 1;
+    }
+    break;
+
+  case 10:
+    digitalWrite(ON_PWM, 1);
+    csg_vitesse = 1;
+    if (encoder.getCount() > 730)
+    {
+      etat = 11;
+    }
+    break;
+
+  case 11:
+    digitalWrite(ON_PWM, 0);
+    ledcWrite(canal0, 0);
+    step_count += 100;
+    csg_vitesse = 0;
+    integ = 0;
+    delay(1000);
+    etat = 10;
+
+    if (step_count > 730)
+    {
+      etat = 12;
+    }
+    break;
+
+  case 12:
+    if (Val_IR0 < 100)
+    {
+      etat = 1;
+    }
+    else 
+    {
+      etat = 12;
+    }
+
   }
-}
+}  
 
 void vTaskPeriodic(void *pvParameters)
 {
-  const float Kp = 30.0f;         // gain proportionnel (ajuster)
-  const float Ki = 8.0f;         // gain integral (ajuster)
+  const float Kp = 30.0f; // gain proportionnel (ajuster)
+  const float Ki = 8.0f;  // gain integral (ajuster)
 
   int encoder_memo = 0;
   int image_vitesse;
@@ -232,7 +301,6 @@ void vTaskPeriodic(void *pvParameters)
   float erreur;
   float commande;
   float prev_erreur = 0.0f;
-  
 
   TickType_t xLastWakeTime;
   // Lecture du nombre de ticks quand la tâche commence
@@ -245,7 +313,6 @@ void vTaskPeriodic(void *pvParameters)
 
     erreur = (float)csg_vitesse - (float)image_vitesse;
 
-   
     integ = (integ + erreur);
 
     // Correcteur
@@ -264,12 +331,6 @@ void vTaskPeriodic(void *pvParameters)
       digitalWrite(phase, 1);
       ledcWrite(canal0, -commande);
     }
-
-    Serial.printf("%d  %d  %d \n", commande, image_vitesse, csg_vitesse);
-    // Endort la tâche pendant le temps restant par rapport au réveil,
-    // ici 100ms, donc la tâche s'effectue ici toutes les 100ms.
-    // xLastWakeTime sera mis à jour avec le nombre de ticks au prochain
-    // réveil de la tâche.
     vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(10));
   }
 }
